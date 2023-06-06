@@ -1,1 +1,5 @@
 运行方法 ./build/app ./model/yolov5s-640-640.rknn
+编译方法: 
+rm build/* -rf
+cmake -S . -B build
+cmake --build build
