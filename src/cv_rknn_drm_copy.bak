@@ -26,10 +26,10 @@
 #include <dlfcn.h>
 #include <string.h>
 
+#include "display.h"
+
 #define _BASETSD_H
 #define PERF_WITH_POST 1
-#define VIDEO_HEIGHT 800
-#define VIDEO_WIDTH 1280
 
 using namespace std;
 using namespace cv;
@@ -82,16 +82,26 @@ int init_model_file(rknn_context *ctx, char *model_name, unsigned char *model_da
 }
 
 /**
- * 总流程就是通过cv读取摄像头, 
- * 将图像缩放到模型输入的大小, 
- * 将图像转换为RGB格式, 
- * 将图像转换为float类型, 
- * 将图像输入到模型中, 
- * 将模型的输出转换为float类型, 
+ * 总流程就是通过cv读取摄像头,
+ * 将图像缩放到模型输入的大小,
+ * 将图像转换为RGB格式,
+ * 将图像转换为float类型,
+ * 将图像输入到模型中,
+ * 将模型的输出转换为float类型,
  * 将模型的输出转换为RGB
-*/
+ */
+// uint8_t screen_test_buf[800 * 1280 * 4];
 int main(int argc, char **argv)
 {
+
+#if 0
+    uint32_t k = 0;
+
+    for (k = 0; k < 800 * 1280 * 4; k++)
+    {
+        screen_test_buf[k] = 0xff;
+    }
+#endif
 
     int status = 0;
     // 模型名称
@@ -123,6 +133,9 @@ int main(int argc, char **argv)
     }
     model_name = (char *)argv[1];
 
+    // 初始化输出屏幕
+    // create_display_device();
+    dis_init();
     // 打开/dev/video22
     // 4.0版本的cv通过数字就可以打开
     VideoCapture cap(22);
@@ -137,10 +150,11 @@ int main(int argc, char **argv)
         cout << "Error opening video stream or file" << endl;
         return -1;
     }
-    // 设置取出的画面的长宽
-    cap.set(3, VIDEO_WIDTH);
-    cap.set(4, VIDEO_HEIGHT);
 
+    // 设置取出的画面的长宽
+    cap.set(CAP_PROP_FRAME_WIDTH, VIDEO_WIDTH);
+    cap.set(CAP_PROP_FRAME_HEIGHT, VIDEO_HEIGHT);
+    // cap.set(CAP_PROP_CONVERT_RGB, true);
     // 加载网络
     printf("Loading mode...\n");
     ret = init_model_file(&ctx, model_name, model_data);
@@ -217,13 +231,17 @@ int main(int argc, char **argv)
     inputs[0].pass_through = 0;
 
     void *resize_buf = nullptr;
+    void *rotate_buf = nullptr;
     Mat frame;
     resize_buf = malloc(model_height * model_width * channel);
-
+    rotate_buf = malloc(VIDEO_WIDTH * VIDEO_HEIGHT * channel);
+    int counter = 0;
     while (1)
     {
         // Capture frame-by-frame
         cap >> frame;
+        // 打印fram的宽高
+        // printf("frame height:%d, width:%d\n", frame.cols, frame.rows);
 
         // If the frame is empty, break immediately
         if (frame.empty())
@@ -297,17 +315,78 @@ int main(int argc, char **argv)
             // 红色字体
             putText(frame, text, cv::Point(x1, y1 + 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255));
         }
+#if 0
+        // 这里缩小一下试试
+        src = wrapbuffer_virtualaddr((void *)frame.data, img_width, img_height, RK_FORMAT_RGB_888);
+        dst = wrapbuffer_virtualaddr((void *)resize_buf, 1280, 800, RK_FORMAT_RGB_888);
+
+        ret = imcheck(src, dst, src_rect, dst_rect);
+        if (IM_STATUS_NOERROR != ret)
+        {
+            printf("%d, check error! %s", __LINE__, imStrError((IM_STATUS)ret));
+            return -1;
+        }
+        // IM_STATUS STATUS = imresize(src, dst);
+        // 启动RGA硬件转换
+        imresize_t(src, dst, 0, 0, 1, 1);
+#endif
+        int resize_buf_size = VIDEO_WIDTH * VIDEO_HEIGHT * channel;
+        // memset(rotate_buf, 0x00, 1280 * 800 * channel);
+        memset(rotate_buf, 0x80, resize_buf_size);
+
+        // int resize_buf_size = 1280 * 800 * channel;
+
+        // 旋转一下
+        src = wrapbuffer_virtualaddr((void *)frame.data, img_width, img_height, RK_FORMAT_RGB_888);
+        dst = wrapbuffer_virtualaddr((void *)rotate_buf, OUTPUT_IMG_WIDTH, OUTPUT_IMG_HEIGHT, RK_FORMAT_RGB_888);
+        ret = imcheck(src, dst, src_rect, dst_rect);
+        if (IM_STATUS_NOERROR != ret)
+        {
+            printf("%d, check error! %s", __LINE__, imStrError((IM_STATUS)ret));
+            return -1;
+        }
+        ret = imrotate(src, dst, IM_HAL_TRANSFORM_ROT_90);
+        if (ret == IM_STATUS_SUCCESS)
+        {
+            printf("imrotate running success!\n");
+        }
+        else
+        {
+            printf("running failed, %s\n", imStrError((IM_STATUS)ret));
+            break;
+            // release_buf(rga_process);
+        }
+
+        draw_screen_rgb_960((uint8_t *)rotate_buf, resize_buf_size);
+
+        // draw_screen(screen_test_buf, 800 * 1280 * 4);
+        // read_rgba8888_pic_test();
+        // draw_screen_rgba(screen_test_buf, 800 * 1280 * 4);
+        // draw_screen_rgb((uint8_t *)screen_test_buf, resize_buf_size);
+
+        // 写文件通过了
+        if (counter % 100 == 0)
+        {
+            printf("output\n");
+            // cv::Mat resize_img(cv::Size(1280, 800), CV_8UC3, resize_buf);
+            cv::Mat resize_img(cv::Size(OUTPUT_IMG_WIDTH, OUTPUT_IMG_HEIGHT), CV_8UC3, rotate_buf);
+            char *filename;
+            sprintf(filename, "resize%d.jpg", counter);
+            // imwrite(filename, resize_img);
+        }
+
+        counter++;
 
         // 这个frame是cv的frame，不是rga的frame
         // 使用cv的imshow显示
-        imshow("Frame", frame);
+        // imshow("Frame", frame);
         ret = rknn_outputs_release(ctx, io_num.n_output, outputs);
 
         gettimeofday(&stop_time, NULL);
         printf("cost %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000.0);
 
         // Press  ESC on keyboard to exit
-        char c = (char)waitKey(25);
+        char c = (char)waitKey(1);
         if (c == 27)
         {
             break;

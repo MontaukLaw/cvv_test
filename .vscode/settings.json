@@ -58,6 +58,9 @@
         "cinttypes": "cpp",
         "typeinfo": "cpp",
         "map": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "bo.h": "c",
+        "dev.h": "c",
+        "*.bak": "cpp"
     }
 }

@@ -1,8 +1,14 @@
 {
     "env": {
         "myDefaultIncludePath": [
+            "${workspaceFolder}/dep/rkdrm",
             "${workspaceFolder}",
-            "${workspaceFolder}/include"
+            "${workspaceFolder}/include",
+            "/usr/include/",
+            "/usr/include/rockchip",
+            "${workspaceFolder}/dep/rga/include",
+            "/home/orangepi/gflags/build/include",
+
         ],
         "myCompilerPath": "/usr/local/bin/gcc-7"
     },
@@ -15,7 +21,14 @@
                 "/usr/include/opencv4",
                 "${workspaceFolder}/dep/rga/include",
                 "${workspaceFolder}/dep/rknn/include",
-                "${workspaceFolder}/include"
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/dep/rkdrm",
+                "${workspaceFolder}",
+                "${workspaceFolder}/include",
+                "/usr/include/",
+                "/usr/include/rockchip",
+                "${workspaceFolder}/dep/rga/include",
+                "/home/orangepi/gflags/build/include",
             ],
             "defines": [
                 "FOO",

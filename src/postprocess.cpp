@@ -260,12 +260,18 @@ int post_process(int8_t *input0, int8_t *input1, int8_t *input2, int model_in_h,
 
         init = 0;
     }
+
     memset(group, 0, sizeof(detect_result_group_t));
 
     std::vector<float> filterBoxes;
     std::vector<float> objProbs;
     std::vector<int> classId;
 
+    // printf("model_in_h: %d, model_in_w: %d\n", model_in_h, model_in_w);
+    // printf("scale_w: %f, scale_h: %f\n", scale_w, scale_h);
+    // printf("conf_threshold: %f, nms_threshold: %f\n", conf_threshold, nms_threshold);
+
+    // printf("stride 8\n");
     // stride 8
     int stride0 = 8;
     int grid_h0 = model_in_h / stride0;
@@ -273,6 +279,8 @@ int post_process(int8_t *input0, int8_t *input1, int8_t *input2, int model_in_h,
     int validCount0 = 0;
     validCount0 = process(input0, (int *)anchor0, grid_h0, grid_w0, model_in_h, model_in_w, stride0, filterBoxes, objProbs,
                           classId, conf_threshold, qnt_zps[0], qnt_scales[0]);
+
+    // printf("stride 16\n");
 
     // stride 16
     int stride1 = 16;
@@ -282,6 +290,7 @@ int post_process(int8_t *input0, int8_t *input1, int8_t *input2, int model_in_h,
     validCount1 = process(input1, (int *)anchor1, grid_h1, grid_w1, model_in_h, model_in_w, stride1, filterBoxes, objProbs,
                           classId, conf_threshold, qnt_zps[1], qnt_scales[1]);
 
+    // printf("stride 32\n");
     // stride 32
     int stride2 = 32;
     int grid_h2 = model_in_h / stride2;
@@ -291,6 +300,7 @@ int post_process(int8_t *input0, int8_t *input1, int8_t *input2, int model_in_h,
                           classId, conf_threshold, qnt_zps[2], qnt_scales[2]);
 
     int validCount = validCount0 + validCount1 + validCount2;
+    // printf("validCount: %d\n", validCount);
     // no object detect
     if (validCount <= 0)
     {
@@ -339,7 +349,7 @@ int post_process(int8_t *input0, int8_t *input1, int8_t *input2, int model_in_h,
         strncpy(group->results[last_count].name, label, OBJ_NAME_MAX_SIZE);
 
         // printf("result %2d: (%4d, %4d, %4d, %4d), %s\n", i, group->results[last_count].box.left,
-        // group->results[last_count].box.top,
+        //        group->results[last_count].box.top,
         //        group->results[last_count].box.right, group->results[last_count].box.bottom, label);
         last_count++;
     }
