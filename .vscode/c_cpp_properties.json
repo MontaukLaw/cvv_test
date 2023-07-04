@@ -19,6 +19,9 @@
             "includePath": [
                 "/usr/include",
                 "/usr/include/opencv4",
+                "${workspaceFolder}/include/mpp",
+                "${workspaceFolder}/include/osal",
+                "${workspaceFolder}/include/utils",
                 "${workspaceFolder}/dep/rga/include",
                 "${workspaceFolder}/dep/rknn/include",
                 "${workspaceFolder}/include",

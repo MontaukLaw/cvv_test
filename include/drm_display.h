@@ -29,7 +29,7 @@ extern "C"
 #include "modeset.h"
 };
 
-#define SZ_4K 4096
+// #define SZ_4K 4096
 #define PKT_SIZE SZ_4K
 #define CODEC_ALIGN(x, a) (((x) + (a)-1) & ~((a)-1))
 #define LCD_0_CRTC_ID 184
@@ -55,8 +55,8 @@ extern "C"
 #define VIDEO_HEIGHT 960
 #define VIDEO_WIDTH 1280
 
-#define CAM1_VIDEO_HEIGHT 960
 #define CAM1_VIDEO_WIDTH 1280
+#define CAM1_VIDEO_HEIGHT 960
 
 // #define CAM2_VIDEO_HEIGHT 1080
 #define CAM2_VIDEO_HEIGHT 1440

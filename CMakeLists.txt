@@ -65,6 +65,13 @@ target_include_directories(display_output_test PUBLIC "${CMAKE_SOURCE_DIR}/dep/r
                                                "/home/orangepi/gflags/build/include"
                                                )   
 
+
+
+########################### main app ############################
+
+link_directories(${CMAKE_CURRENT_SOURCE_DIR}/dep/mpp/)
+file(GLOB_RECURSE utils_src ${CMAKE_CURRENT_SOURCE_DIR}/src/mpp_utils/*.c)
+
 add_executable(app 
                src/app.cpp 
                src/monitor_init.cpp
@@ -73,11 +80,27 @@ add_executable(app
                dep/rkdrm/modeset.c  
                src/model_utils.cpp
                src/postprocess.cpp
+               src/encoder_app.cpp
+               src/encoder.cpp
+               src/ctx_manager.cpp
+               src/rtsp_server.cpp
+               ${utils_src}
 )
 
-target_link_libraries(app ${OpenCV_LIBS} ${RKNN_RT_LIB} ${RGA_LIB} rockchip_mpp drm ${GFLAG_LIB})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/mpp)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/mpp/base)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/osal)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/utils)
+
+target_link_libraries(app ${OpenCV_LIBS} ${RKNN_RT_LIB} ${RGA_LIB} rockchip_mpp drm ${GFLAG_LIB} osal rockchip_mpp pthread)
 target_include_directories(app PUBLIC "${CMAKE_SOURCE_DIR}/dep/rkdrm" 
                                                "/usr/include/rockchip/"
                                                "/usr/include/drm/"
                                                "/home/orangepi/gflags/build/include"
-                                               )            
+                                               )         
+
+
+########################## test v4l2 #########################                                        
+add_executable(v4l2demo src/wasted/v4l2_test.cpp)
+target_link_libraries(v4l2demo v4l2)

@@ -1,4 +1,8 @@
 #include "model_utils.h"
+#include "encoder_user_comm.h"
+
+// 是否连接摄像头
+#define IF_USING_SCREENS 0
 
 using namespace std;
 using namespace cv;
@@ -9,8 +13,14 @@ bool ifCam2Connected = false;
 const float nms_threshold = NMS_THRESH;
 const float box_conf_threshold = BOX_THRESH;
 
+extern bool newFrameArrived;
+
+RK_U8 yuvFrameData[CAM1_VIDEO_WIDTH * CAM1_VIDEO_WIDTH * 3 / 2];
+
 // 22是855
-VideoCapture cam1Cap(22);
+// VideoCapture cam1Cap(22, CAP_V4L);
+VideoCapture cam1Cap(22, CAP_GSTREAMER);
+
 // 31是850
 VideoCapture cam2Cap(31);
 
@@ -21,7 +31,7 @@ static void test_cam()
 
     if (!cam1Cap.isOpened())
     {
-        cout << "Error opening video stream or file" << endl;
+        cout << "Error opening cam 1" << endl;
     }
     else
     {
@@ -30,7 +40,7 @@ static void test_cam()
 
     if (!cam2Cap.isOpened())
     {
-        cout << "Error opening video stream or file" << endl;
+        cout << "Error opening cam 2" << endl;
     }
     else
     {
@@ -83,8 +93,215 @@ static void resize_frame_to_model(Mat frame, void *model_input_buf, int model_wi
     imresize_t(src, dst, 0, 0, 1, 1);
 }
 
+void get_frame_type(Mat frame)
+{
+    if (frame.type() == CV_8UC3)
+    {
+        std::cout << "Color format: BGR" << std::endl;
+    }
+    else if (frame.type() == CV_8UC4)
+    {
+        std::cout << "Color format: BGRA" << std::endl;
+    }
+    else
+    {
+        std::cout << "Color format: Unknown" << std::endl;
+    }
+}
+
+void convertBGRtoYUV420SP(const cv::Mat &bgrImage, cv::Mat &yuv420spImage)
+{
+    int width = bgrImage.cols;
+    int height = bgrImage.rows;
+
+    // 分配YUV420SP格式的图像内存
+    yuv420spImage.create(height * 3 / 2, width, CV_8UC1);
+
+    // 分离BGR通道
+    std::vector<cv::Mat> channels;
+    cv::split(bgrImage, channels);
+
+    // 将BGR数据转换为YUV数据
+    cv::Mat yChannel = 0.299 * channels[2] + 0.587 * channels[1] + 0.114 * channels[0];
+    cv::Mat uChannel, vChannel;
+    cv::resize(channels[1], uChannel, cv::Size(width / 2, height / 2), 0, 0, cv::INTER_LINEAR);
+    cv::resize(channels[0], vChannel, cv::Size(width / 2, height / 2), 0, 0, cv::INTER_LINEAR);
+
+    // 将Y通道数据拷贝到YUV420SP格式的图像中
+    cv::Mat yROI(yuv420spImage, cv::Rect(0, 0, width, height));
+    yChannel.copyTo(yROI);
+
+    // 将U和V通道数据交错存储到YUV420SP格式的图像中
+    cv::Mat uvROI(yuv420spImage, cv::Rect(0, height, width, height / 2));
+    for (int i = 0; i < uChannel.rows; i++)
+    {
+        for (int j = 0; j < uChannel.cols; j++)
+        {
+            uchar u = uChannel.at<uchar>(i, j);
+            uchar v = vChannel.at<uchar>(i, j);
+            uvROI.at<uchar>(i * 2, j * 2) = u;
+            uvROI.at<uchar>(i * 2, j * 2 + 1) = v;
+            uvROI.at<uchar>(i * 2 + 1, j * 2) = u;
+            uvROI.at<uchar>(i * 2 + 1, j * 2 + 1) = v;
+        }
+    }
+}
+
+void convertBGRtoNV12(const cv::Mat &bgrImage, cv::Mat &nv12Image)
+{
+    int width = bgrImage.cols;
+    int height = bgrImage.rows;
+
+    // 分配NV12格式的图像内存
+    nv12Image.create(height * 3 / 2, width, CV_8UC1);
+
+    // 分离BGR通道
+    std::vector<cv::Mat> channels;
+    cv::split(bgrImage, channels);
+
+    // 将BGR数据转换为YUV数据
+    cv::Mat yChannel = 0.299 * channels[2] + 0.587 * channels[1] + 0.114 * channels[0];
+    cv::Mat uChannel = -0.169 * channels[2] - 0.331 * channels[1] + 0.5 * channels[0] + 128;
+    cv::Mat vChannel = 0.5 * channels[2] - 0.419 * channels[1] - 0.081 * channels[0] + 128;
+
+    // 将Y、U和V通道数据拷贝到NV12格式的图像中
+    cv::Mat yROI(nv12Image, cv::Rect(0, 0, width, height));
+    yChannel.copyTo(yROI);
+
+    cv::Mat uvROI(nv12Image, cv::Rect(0, height, width, height / 2));
+    cv::Mat uvChannels[] = {uChannel, vChannel};
+    cv::merge(uvChannels, 2, uvROI);
+}
+
+void test()
+{
+    cv::Mat bgr_mat = cv::imread("cam1.jpg", cv::IMREAD_COLOR);
+
+    int height = bgr_mat.rows;
+    int width = bgr_mat.cols;
+
+    cv::Mat img_nv12;
+    cv::Mat yuv_mat;
+    cv::cvtColor(bgr_mat, yuv_mat, cv::COLOR_BGR2YUV_I420);
+
+    uint8_t *yuv = yuv_mat.ptr<uint8_t>();
+    img_nv12 = cv::Mat(height * 3 / 2, width, CV_8UC1);
+    uint8_t *ynv12 = img_nv12.ptr<uint8_t>();
+
+    int32_t uv_height = height / 2;
+    int32_t uv_width = width / 2;
+
+    // copy y data
+    int32_t y_size = height * width;
+    memcpy(ynv12, yuv, y_size);
+
+    // copy uv data
+    uint8_t *nv12 = ynv12 + y_size;
+    uint8_t *u_data = yuv + y_size;
+    uint8_t *v_data = u_data + uv_height * uv_width;
+
+    for (int32_t i = 0; i < uv_width * uv_height; i++)
+    {
+        *nv12++ = *u_data++;
+        *nv12++ = *v_data++;
+    }
+
+    int32_t yuv_size = y_size + 2 * uv_height * uv_width;
+    FILE *yuvFd = fopen("1.yuv", "w+");
+    fwrite(img_nv12.ptr<uint8_t>(), 1, yuv_size, yuvFd);
+    fclose(yuvFd);
+}
+
+void save_yuv(cv::Mat &yuv_mat, int height, int width)
+{
+    cv::Mat img_nv12;
+    uint8_t *yuv = yuv_mat.ptr<uint8_t>();
+    img_nv12 = cv::Mat(height * 3 / 2, width, CV_8UC1);
+    uint8_t *ynv12 = img_nv12.ptr<uint8_t>();
+
+    int32_t uv_height = height / 2;
+    int32_t uv_width = width / 2;
+
+    // copy y data
+    int32_t y_size = height * width;
+    memcpy(ynv12, yuv, y_size);
+
+    // copy uv data
+    uint8_t *nv12 = ynv12 + y_size;
+    uint8_t *u_data = yuv + y_size;
+    uint8_t *v_data = u_data + uv_height * uv_width;
+
+    for (int32_t i = 0; i < uv_width * uv_height; i++)
+    {
+        *nv12++ = *u_data++;
+        *nv12++ = *v_data++;
+    }
+
+    int32_t yuv_size = y_size + 2 * uv_height * uv_width;
+    FILE *yuvFd = fopen("1.yuv", "w+");
+    fwrite(img_nv12.ptr<uint8_t>(), 1, yuv_size, yuvFd);
+    fclose(yuvFd);
+}
+
+void trans_data_2_yuv_for_encoder(cv::Mat &bgrMat, int width, int height)
+{
+
+    cv::Mat yuv_mat;
+    cv::cvtColor(bgrMat, yuv_mat, cv::COLOR_BGR2YUV_I420);
+    cv::Mat img_nv12;
+    uint8_t *yuv = yuv_mat.ptr<uint8_t>();
+    img_nv12 = cv::Mat(height * 3 / 2, width, CV_8UC1);
+    uint8_t *ynv12 = img_nv12.ptr<uint8_t>();
+
+    int32_t uv_height = height / 2;
+    int32_t uv_width = width / 2;
+
+    // copy y data
+    int32_t y_size = height * width;
+    memcpy(ynv12, yuv, y_size);
+
+    // copy uv data
+    uint8_t *nv12 = ynv12 + y_size;
+    uint8_t *u_data = yuv + y_size;
+    uint8_t *v_data = u_data + uv_height * uv_width;
+
+    for (int32_t i = 0; i < uv_width * uv_height; i++)
+    {
+        *nv12++ = *u_data++;
+        *nv12++ = *v_data++;
+    }
+
+    int32_t yuv_size = y_size + 2 * uv_height * uv_width;
+    // FILE *yuvFd = fopen("1.yuv", "w+");
+    // fwrite(img_nv12.ptr<uint8_t>(), 1, yuv_size, yuvFd);
+    // fclose(yuvFd);
+
+    memset((RK_U8 *)yuvFrameData, 0, yuv_size);
+    memcpy((RK_U8 *)yuvFrameData, img_nv12.ptr<uint8_t>(), yuv_size);
+
+    newFrameArrived = true;
+}
+
+void *thread_func(void *args)
+{
+    while (1)
+    {
+        if (!newFrameArrived)
+        {
+            usleep(1000);
+            continue;
+        }
+
+        printf("thread_func\n");
+        newFrameArrived = false;
+    }
+}
+
 int main(int argc, char **argv)
 {
+    // test();
+    // return 1;
+
     struct timeval start_time, stop_time;
     if (argc != 2)
     {
@@ -114,8 +331,11 @@ int main(int argc, char **argv)
     memset(&src, 0, sizeof(src));
     memset(&dst, 0, sizeof(dst));
 
-    // 待修改
-    double_dis_init();
+    // 判断是否连接屏幕
+    if (IF_USING_SCREENS)
+    {
+        double_dis_init();
+    }
 
     // 测试摄像头
     test_cam();
@@ -131,6 +351,19 @@ int main(int argc, char **argv)
 
     cam2Cap.set(CAP_PROP_FRAME_WIDTH, CAM2_VIDEO_WIDTH);
     cam2Cap.set(CAP_PROP_FRAME_HEIGHT, CAM2_VIDEO_HEIGHT);
+
+    // cam1Cap.set(CAP_PROP_FOURCC, VideoWriter::fourcc('M', 'J', 'P', 'G'));
+    // cam2Cap.set(CAP_PROP_FOURCC, VideoWriter::fourcc('M', 'J', 'P', 'G'));
+
+    // cam1Cap.set(CAP_PROP_FPS, 20.0f);
+    // cam2Cap.set(CAP_PROP_FPS, 20.0f);
+
+    printf("cam1 fps is:%d\n", (int)cam1Cap.get(CAP_PROP_FPS));
+    printf("cam1 CAP_PROP_MODE:%d\n", (int)cam1Cap.get(CAP_PROP_MODE));
+    printf("cam1 CAP_PROP_CONVERT_RGB:%d\n", (int)cam1Cap.get(CAP_PROP_CONVERT_RGB));
+    printf("cam1 CAP_PROP_CODEC_PIXEL_FORMAT:%d\n", (int)cam1Cap.get(CAP_PROP_CODEC_PIXEL_FORMAT));
+
+    printf("cam2 fps is:%d\n", (int)cam2Cap.get(CAP_PROP_FPS));
 
     // 获取一帧测试用的图像
     get_image_test();
@@ -164,6 +397,17 @@ int main(int argc, char **argv)
     int counter = 0;
 
     rknn_output outputs[MODLE_OUTPUT_NUM];
+
+    // 打开编码器
+    start_encode(argv[0]);
+
+    // 初始化rtsp服务
+    RtspServer_init();
+
+    // 新建一个线程测试
+    // pthread_t thread;
+    // pthread_create(&thread, NULL, thread_func, NULL);
+
     while (1)
     {
         // cam1
@@ -172,6 +416,15 @@ int main(int argc, char **argv)
             cam1Cap >> frame;
             if (frame.empty())
                 break;
+
+            static int startOnce = 0;
+            if (startOnce == 0)
+            {
+
+                cv::Mat yuv_mat;
+                cv::cvtColor(frame, yuv_mat, cv::COLOR_BGR2YUV_I420);
+                // save_yuv(yuv_mat, frame.rows, frame.cols);
+            }
 
 #if 0
             // printf("resize with RGA!\n");
@@ -187,7 +440,9 @@ int main(int argc, char **argv)
             }
 
             imresize_t(src, dst, 0, 0, 1, 1);
+
 #endif
+
             gettimeofday(&start_time, NULL);
 
             resize_frame_to_model(frame, model_input_buf, model_width, model_height, channel, CAM1_VIDEO_WIDTH, CAM1_VIDEO_HEIGHT);
@@ -262,9 +517,15 @@ int main(int argc, char **argv)
                 putText(frame, text, cv::Point(x1, y1 + 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255));
             }
 
+            // 将结果转成yuv格式, 准备送去解码.
+            trans_data_2_yuv_for_encoder(frame, CAM1_VIDEO_WIDTH, CAM1_VIDEO_HEIGHT);
+
             int resize_buf_size = LCD_DATA_WIDTH * LCD_DATA_HEIGHT * channel;
             // memset(rotate_buf, 0x00, 1280 * 800 * channel);
             memset(lcd_data_buf, 0x80, resize_buf_size);
+
+            // 因为屏幕是需要旋转的, 而图像本身是正的, 尝试保存看看.
+            cv::Mat img(cv::Size(CAM1_VIDEO_WIDTH, CAM1_VIDEO_HEIGHT), CV_8UC3, frame.data);
 
             // 旋转一下
             src = wrapbuffer_virtualaddr((void *)frame.data, CAM1_VIDEO_WIDTH, CAM1_VIDEO_HEIGHT, RK_FORMAT_RGB_888);
@@ -276,10 +537,11 @@ int main(int argc, char **argv)
                 return -1;
             }
 
+            // 为了适配屏幕, 旋转90度
             ret = imrotate(src, dst, IM_HAL_TRANSFORM_ROT_90);
             if (ret == IM_STATUS_SUCCESS)
             {
-                printf("imrotate running success!\n");
+                // printf("imrotate running success!\n");
             }
             else
             {
@@ -289,7 +551,10 @@ int main(int argc, char **argv)
             }
 
             // 960
-            draw_lcd_screen_rgb_960((uint8_t *)lcd_data_buf, resize_buf_size);
+            if (IF_USING_SCREENS)
+            {
+                draw_lcd_screen_rgb_960((uint8_t *)lcd_data_buf, resize_buf_size);
+            }
 
             // 写文件通过了
             if (counter % 100 == 0)
@@ -308,7 +573,7 @@ int main(int argc, char **argv)
             ret = rknn_outputs_release(ctx, MODLE_OUTPUT_NUM, outputs);
 
             gettimeofday(&stop_time, NULL);
-            printf("cost %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000.0);
+            printf("cam1 inference cost %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000.0);
         }
 
         // cam2
@@ -393,17 +658,19 @@ int main(int argc, char **argv)
             int resize_buf_size = HDMI_DATA_WIDTH * HDMI_DATA_HEIGHT * channel;
             // memset(rotate_buf, 0x00, 1280 * 800 * channel);
             // memset(lcd_data_buf, 0x80, resize_buf_size);
-
-            draw_hdmi_screen_rgb(frame.data, resize_buf_size);
+            if (IF_USING_SCREENS)
+            {
+                draw_hdmi_screen_rgb(frame.data, resize_buf_size);
+            }
             // hdmi_draw_test();
-           
+
             // cv::Mat output_img(cv::Size(HDMI_DATA_HEIGHT, HDMI_DATA_WIDTH), CV_8UC3, frame.data);
             // imwrite("hdmioutput.jpg", output_img);
 
             ret = rknn_outputs_release(ctx, MODLE_OUTPUT_NUM, outputs);
 
             gettimeofday(&stop_time, NULL);
-            printf("cost %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000.0);
+            printf("cam 2 inference cost %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000.0);
         }
 
         char c = (char)waitKey(1);

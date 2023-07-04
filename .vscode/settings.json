@@ -61,6 +61,7 @@
         "set": "cpp",
         "bo.h": "c",
         "dev.h": "c",
-        "*.bak": "cpp"
+        "*.bak": "cpp",
+        "encoder_user_comm.h": "c"
     }
 }

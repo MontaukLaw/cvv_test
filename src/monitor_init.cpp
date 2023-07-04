@@ -104,8 +104,10 @@ static void get_crtc()
 static int init_screens()
 {
     int ret = 0;
+    
     // 获取lcd connector
     get_connector(OUTPUT_DEVICE_LCD);
+
     // 获取hdmi connector
     get_connector(OUTPUT_DEVICE_HDMI);
 
@@ -120,6 +122,7 @@ static int init_screens()
 
     // 获取lcd encoder
     get_encoder(OUTPUT_DEVICE_LCD);
+
     // 获取hdmi encoder
     get_encoder(OUTPUT_DEVICE_HDMI);
 
