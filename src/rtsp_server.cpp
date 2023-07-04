@@ -1,10 +1,10 @@
 #include "rtsp_server.h"
 
 RTP_FIXED_HEADER *rtp_hdr;
-
 NALU_HEADER *nalu_hdr;
 FU_INDICATOR *fu_ind;
 FU_HEADER *fu_hdr;
+AU_HEADER *au_hdr;
 
 RTSP_CLIENT g_rtspClients[MAX_RTSP_CLIENT];
 
@@ -15,7 +15,8 @@ pthread_mutex_t g_sendmutex;
 
 pthread_t g_SendDataThreadId = 0;
 // HAL_CLIENT_HANDLE hMainStreamClient = NULL,hSubStreamClient = NULL,hAudioClient = NULL;
-char g_rtp_playload[20];
+char *g_rtp_playload = "G726-32"; //[20];
+
 int g_audio_rate = 8000;
 // VIDEO_NORM_E gs_enNorm = VIDEO_ENCODING_MODE_NTSC;  //30fps
 int g_nframerate;
@@ -42,7 +43,7 @@ static char *GetLocalIP(int sock)
 {
     struct ifreq ifreq;
     struct sockaddr_in *sin;
-    char *LocalIP = malloc(20);
+    char *LocalIP = (char *)malloc(20);
     strcpy(ifreq.ifr_name, "wlan");
     if (!(ioctl(sock, SIOCGIFADDR, &ifreq)))
     {
@@ -60,7 +61,7 @@ char *strDupSize(char const *str)
     if (str == NULL)
         return NULL;
     size_t len = strlen(str) + 1;
-    char *copy = malloc(len);
+    char *copy = (char *)malloc(len);
 
     return copy;
 }
@@ -275,7 +276,7 @@ int DescribeAnswer(char *cseq, int sock, char *urlSuffix, char *recvbuf)
             pTemp2 += sprintf(pTemp2, "a=fmtp:97 packetization-mode=1\r\n");
         }
 #endif
-        pTemp += sprintf(pTemp, "Content-length: %d\r\n", strlen(sdpMsg));
+        pTemp += sprintf(pTemp, "Content-length: %d\r\n", (int)strlen(sdpMsg));
         pTemp += sprintf(pTemp, "Content-Base: rtsp://%s/%s/\r\n\r\n", localip, urlSuffix);
 
         // printf("mem ready\n");
@@ -353,7 +354,7 @@ void ParseTransportHeader(char const *buf,
         }
         else if (sscanf(field, "ttl%u", &ttl) == 1)
         {
-            destinationTTL = (u_int8_t)ttl;
+            destinationTTL = (u_int8_t *)ttl;
         }
         else if (sscanf(field, "client_port=%hu-%hu", &p1, &p2) == 2)
         {
@@ -363,7 +364,15 @@ void ParseTransportHeader(char const *buf,
         else if (sscanf(field, "client_port=%hu", &p1) == 1)
         {
             *clientRTPPortNum = p1;
-            *clientRTCPPortNum = streamingMode == RAW_UDP ? 0 : p1 + 1;
+            if (*streamingMode == RAW_UDP)
+            {
+                *clientRTCPPortNum = 0;
+            }
+            else
+            {
+                *clientRTCPPortNum = p1 + 1;
+            }
+            // *clientRTCPPortNum = streamingMode == RAW_UDP ? 0 : p1 + 1;
         }
         else if (sscanf(field, "interleaved=%u-%u", &rtpCid, &rtcpCid) == 2)
         {
@@ -588,7 +597,7 @@ void *RtspClientMsg(void *pParam)
         {
             PlayAnswer(cseq, pClient->socket, pClient->sessionid, g_rtspClients[pClient->index].urlPre, p);
             g_rtspClients[pClient->index].status = RTSP_SENDING;
-            printf("Start Play\n", pClient->index);
+            printf("Start Play to client: %d \n", pClient->index);
             // printf("-----------------------------PlayAnswer %d %d\n",pClient->index);
             // usleep(100);
         }
@@ -632,28 +641,36 @@ void *RtspServerListen(void *pParam)
 
     if (setsockopt(s32Socket, SOL_SOCKET, SO_REUSEADDR, &s32Socket_opt_value, sizeof(int)) == -1)
     {
+        printf("RTSP:setsockopt error\n");
         return (void *)(-1);
     }
+    // int yes=1;
+    // if (setsockopt(s32Socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
+    // {
+    //     perror("setsockopt");
+    //     return (void *)(-1);
+    // }
     s32Rtn = bind(s32Socket, (struct sockaddr *)&servaddr, sizeof(struct sockaddr_in));
     if (s32Rtn < 0)
     {
+        printf("RTSP:bind error\n");
         return (void *)(-2);
     }
 
     s32Rtn = listen(s32Socket, 50);
     if (s32Rtn < 0)
     {
-
+        printf("RTSP:listen error\n");
         return (void *)(-2);
     }
 
     nAddrLen = sizeof(struct sockaddr_in);
     int nSessionId = 1000;
-    while ((s32CSocket = accept(s32Socket, (struct sockaddr *)&addrAccept, &nAddrLen)) >= 0)
+    while ((s32CSocket = accept(s32Socket, (struct sockaddr *)&addrAccept, (socklen_t *)&nAddrLen)) >= 0)
     {
         printf("<<<<RTSP Client %s Connected...\n", inet_ntoa(addrAccept.sin_addr));
 
-        int nMaxBuf = 10 * 1024; // ÏµÍ³œ«»á·ÖÅä 2 x nMaxBuf µÄ»º³åŽóÐ¡
+        int nMaxBuf = 10 * 1024;
         if (setsockopt(s32CSocket, SOL_SOCKET, SO_SNDBUF, (char *)&nMaxBuf, sizeof(nMaxBuf)) == -1)
             printf("RTSP:!!!!!! Enalarge socket sending buffer error !!!!!!\n");
         int i;
@@ -700,7 +717,7 @@ void *RtspServerListen(void *pParam)
     }
     if (s32CSocket < 0)
     {
-        // HI_OUT_Printf(0, "RTSP listening on port %d,accept err, %d\n", RTSP_SERVER_PORT, s32CSocket);
+        printf(0, "RTSP listening on port %d,accept err, %d\n", RTSP_SERVER_PORT, s32CSocket);
     }
 
     printf("----- INIT_RTSP_Listen() Exit !! \n");
@@ -840,34 +857,7 @@ RK_S32 VENC_Sent(char *buffer, int buflen)
     }
 
     //------------------------------------------------------------
-}
-
-// 初始化rtsp服务
-void RtspServer_init(void)
-{
-    int i;
-    pthread_t threadId = 0;
-
-    memset(&g_rtp_playload, 0, sizeof(g_rtp_playload));
-    strcpy(&g_rtp_playload, "G726-32");
-    g_audio_rate = 8000;
-    pthread_mutex_init(&g_sendmutex, NULL);
-    pthread_mutex_init(&g_mutex, NULL);
-    pthread_cond_init(&g_cond, NULL);
-    memset(&g_rtspClients, 0, sizeof(RTSP_CLIENT) * MAX_RTSP_CLIENT);
-
-    // pthread_create(&g_SendDataThreadId, NULL, SendDataThread, NULL);
-
-    struct sched_param thdsched;
-    thdsched.sched_priority = 2;
-    // to listen visiting
-    pthread_create(&threadId, NULL, RtspServerListen, NULL);
-    // pthread_setschedparam(threadId,SCHED_RR,&thdsched);
-    printf("RTSP:-----Init Rtsp server\n");
-
-    pthread_create(&gs_RtpPid, 0, vdRTPSendThread, NULL);
-
-    // exitok++;
+    return RK_OK;
 }
 
 void RtspServer_exit(void)
@@ -893,4 +883,60 @@ void *vdRTPSendThread(void *p)
         }
         usleep(5000);
     }
+}
+
+// 初始化rtsp服务
+void RtspServer_init(void)
+{
+    int i;
+    pthread_t threadId = 0;
+
+    // memset(&g_rtp_playload, 0, sizeof(g_rtp_playload));
+    // strcpy(&g_rtp_playload, "G726-32");
+    // g_rtp_playload = (char *)"G726-32";
+
+    g_audio_rate = 8000;
+    pthread_mutex_init(&g_sendmutex, NULL);
+    pthread_mutex_init(&g_mutex, NULL);
+    pthread_cond_init(&g_cond, NULL);
+    memset(&g_rtspClients, 0, sizeof(RTSP_CLIENT) * MAX_RTSP_CLIENT);
+
+    // pthread_create(&g_SendDataThreadId, NULL, SendDataThread, NULL);
+
+    struct sched_param thdsched;
+    thdsched.sched_priority = 2;
+    // to listen visiting
+    pthread_create(&threadId, NULL, RtspServerListen, NULL);
+    // pthread_setschedparam(threadId,SCHED_RR,&thdsched);
+    printf("RTSP:-----Init Rtsp server\n");
+    pthread_create(&gs_RtpPid, 0, vdRTPSendThread, NULL);
+
+    // exitok++;
+}
+
+// RK_S32 saveStream(VENC_STREAM_S *pstStream)
+RK_S32 saveStream(char *pktBuf, int bufLen)
+{
+    RK_S32 i, j, lens = 0;
+    // have atleast a connect
+    for (j = 0; j < MAX_RTSP_CLIENT; j++)
+    {
+        if (g_rtspClients[j].status == RTSP_SENDING)
+        {
+            printf("save pkt to list\n");
+            RTPbuf_s *p = (RTPbuf_s *)malloc(sizeof(RTPbuf_s));
+            INIT_LIST_HEAD(&(p->list));
+
+            // lens = pstStream->pstPack[i].u32Len - pstStream->pstPack[i].u32Offset;
+            p->buf = (char *)malloc(bufLen);
+            p->len = bufLen;
+            memcpy(p->buf, pktBuf, bufLen);
+
+            list_add_tail(&(p->list), &RTPbuf_head);
+            count++;
+            // printf("count = %d\n",count);
+        }
+    }
+
+    return RK_OK;
 }

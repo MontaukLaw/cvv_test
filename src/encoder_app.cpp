@@ -44,6 +44,7 @@ static void release(MpiEncTestArgs *cmd)
     MPP_FREE(cmd->file_slt);
     MPP_FREE(cmd);
 }
+
 // 起另一个线程来编码
 int enc_test_multi(MpiEncTestArgs *cmd, const char *name)
 {

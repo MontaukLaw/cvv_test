@@ -1,5 +1,6 @@
 #include "model_utils.h"
 #include "encoder_user_comm.h"
+#include "rtsp_server.h"
 
 // 是否连接摄像头
 #define IF_USING_SCREENS 0

@@ -1,4 +1,5 @@
 #include "encoder_user_comm.h"
+#include "rtsp_server.h"
 
 bool newFrameArrived = false;
 extern RK_U8 yuvFrameData[];
@@ -14,6 +15,7 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
     RK_U32 cap_num = 0;
     DataCrc checkcrc;
     MPP_RET ret = MPP_OK;
+    // VENC_STREAM_S stStream;
 
     memset(&checkcrc, 0, sizeof(checkcrc));
     checkcrc.sum = mpp_malloc(RK_ULONG, 512);
@@ -67,11 +69,11 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
             MppBuffer cam_buf = NULL;
             RK_U32 eoi = 1;
             // step 1. copy mem
-            printf("copy mem size:%ld\n", p->frame_size);
+            // printf("copy mem size:%ld\n", p->frame_size);
             memcpy(buf, yuvFrameData, p->frame_size);
 
             // step 2. frame init
-            printf("mpp_frame_init\n");
+            // printf("mpp_frame_init\n");
             ret = mpp_frame_init(&frame);
             if (ret)
             {
@@ -79,7 +81,7 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
                 return ret;
             }
 
-            printf("set frame properties\n");
+            // printf("set frame properties\n");
             // step 3. 设置帧的属性
             mpp_frame_set_width(frame, p->width);
             mpp_frame_set_height(frame, p->height);
@@ -89,7 +91,7 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
             mpp_frame_set_eos(frame, p->frm_eos);
 
             // step 4. set buffer
-            printf("set frame buffer\n");
+            // printf("set frame buffer\n");
             mpp_frame_set_buffer(frame, p->frm_buf);
 
             // step 5. get meta
@@ -136,7 +138,7 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
                     // packet的概念应该来自ffmpeg
                     void *ptr = mpp_packet_get_pos(packet);
                     size_t len = mpp_packet_get_length(packet);
-                    printf("packet len:%ld\n", len);
+                    // printf("packet len:%ld\n", len);
 
                     char log_buf[256];
                     RK_S32 log_size = sizeof(log_buf) - 1;
@@ -147,8 +149,11 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
 
                     p->pkt_eos = mpp_packet_get_eos(packet);
 
+                    saveStream((char *)ptr, len);
+
                     if (p->fp_output)
                     {
+
                         // write stream data to file
                         // fwrite(ptr, 1, len, p->fp_output);
                     }
@@ -191,7 +196,7 @@ MPP_RET test_mpp_run(MpiEncMultiCtxInfo *info)
                     }
 
                     mpp_log_q(quiet, "chn %d %s\n", chn, log_buf);
-                    printf("chn %d %s\n", chn, log_buf);
+                    // printf("chn %d %s\n", chn, log_buf);
 
                     mpp_packet_deinit(&packet);
                     fps_calc_inc(cmd->fps);

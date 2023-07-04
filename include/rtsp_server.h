@@ -29,7 +29,7 @@
 #define RTP_H264 96
 #define RTP_AUDIO 97
 #define MAX_RTSP_CLIENT 1
-#define RTSP_SERVER_PORT 554
+#define RTSP_SERVER_PORT 5554
 #define RTSP_RECV_SIZE 1024
 #define RTSP_MAX_VID (640 * 1024)
 #define RTSP_MAX_AUD (15 * 1024)
@@ -40,8 +40,20 @@
 #ifndef FALSE
 #define FALSE 0
 #endif
+
 #ifndef TRUE
 #define TRUE 1
+#endif
+
+#define __PACKED__ __attribute__((__packed__))
+
+typedef unsigned short u_int16_t;
+typedef unsigned char u_int8_t;
+typedef u_int16_t portNumBits;
+typedef u_int32_t netAddressBits;
+
+#define AUDIO_RATE 8000
+#define PACKET_BUFFER_END (unsigned int)0x00000000
 
 typedef long long _int64;
 
@@ -166,14 +178,8 @@ typedef enum
     RAW_UDP
 } StreamingMode;
 
-RTP_FIXED_HEADER *rtp_hdr;
-NALU_HEADER *nalu_hdr;
-FU_INDICATOR *fu_ind;
-FU_HEADER *fu_hdr;
-AU_HEADER *au_hdr;
-
-extern char g_rtp_playload[20];
-extern int g_audio_rate;
+// extern char g_rtp_playload[20];
+// extern int g_audio_rate;
 
 typedef enum
 {
@@ -239,11 +245,38 @@ typedef struct _rtpbuf
     char *buf;
 } RTPbuf_s;
 
+#define ALIGN_NUM 4
+#define ATTRIBUTE __attribute__((aligned(ALIGN_NUM)))
+
+typedef struct hiVENC_PACK_S
+{
+    RK_U64 u64PhyAddr;        /* R; the physics address of stream */
+    RK_U8 ATTRIBUTE *pu8Addr; /* R; the virtual address of stream */
+    RK_U32 ATTRIBUTE u32Len;  /* R; the length of stream */
+
+    RK_U64 u64PTS;  /* R; PTS */
+    bool bFrameEnd; /* R; frame end */
+
+    RK_U32 u32Offset;  /* R; the offset between the Valid data and the start address */
+    RK_U32 u32DataNum; /* R; the  stream packets num */
+    // VENC_PACK_INFO_S stPackInfo[8]; /* R; the stream packet Information */
+} VENC_PACK_S;
+
+typedef struct hiVENC_STREAM_S
+{
+    VENC_PACK_S ATTRIBUTE *pstPack; /* R; stream pack attribute */
+    RK_U32 ATTRIBUTE u32PackCount;  /* R; the pack number of one frame stream */
+    RK_U32 u32Seq;                  /* R; the list number of stream */
+
+} VENC_STREAM_S;
+
 extern struct list_head RTPbuf_head;
 
 extern void RtspServer_init(void);
 extern void RtspServer_exit(void);
 
 int AddFrameToRtspBuf(int nChanNum, enRTSP_MonBlockType eType, char *pData, unsigned int nSize, unsigned int nVidFrmNum, int bIFrm);
+
+RK_S32 saveStream(char *pktBuf, int bufLen);
 
 #endif
